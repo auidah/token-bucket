@@ -11,7 +11,7 @@ bucket reaches its configured capacity, depositing additional tokens will not
 change the volume of tokens in the bucket.  Also, this implementation will
 never give more tokens than are available in the bucket.
 
-While this project was conceived for the purposes below, it could be adapter to
+While this project was conceived for the purposes below, it could be adapted to
 any scenario in which such facilities are useful.
 
 ## Purpose
