@@ -16,8 +16,8 @@ any scenario in which such facilities are useful.
 
 ## Purpose
 
-1) Configurable rate limiting with a sliding window.
-2) Avoid unnecessary multi-threading in the tap implementation.
+1. Configurable rate limiting with a sliding window.
+1. Avoid unnecessary multi-threading in the tap implementation.
 
 ## Usage Model
 
