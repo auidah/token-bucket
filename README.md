@@ -31,3 +31,10 @@ The client of the token bucket has the following requirements:
   frame: burst rate and sustained maximum rate are two such concepts which are
 handled well by a token bucket.
 
+## Specification of Behaviour
+
+Refer to the TokenBucketSpec for a specification of how the token bucket
+behaves in each scenario.  If you'd like to see addtional or alternative
+behaviour, both pull requests and feature requests are always welcome.  Please
+also provide feedback on any bugs.
+
