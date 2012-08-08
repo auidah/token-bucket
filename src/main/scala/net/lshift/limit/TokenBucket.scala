@@ -70,9 +70,14 @@ class ClockBasedTap(clock: Clock = RealTimeClock) extends Tap {
 }
 
 trait TokenBucket {
-  def tryConsume(tokens: Long): (TokenBucket, Long)
-  def deposit(tokens: Long): (TokenBucket, Long)
   def contents: Long
+  def copyConstructor(tokens: Long): TokenBucket
+  def preConsume: TokenBucket = this
+  def tryConsume(tokens: Long): (TokenBucket, Long) = {
+    preConsume.doConsume(tokens)
+  }
+  def doConsume(tokens: Long): (TokenBucket, Long)
+  def deposit(tokens: Long): TokenBucket
 }
 
 object TokenBucket {
@@ -83,13 +88,20 @@ trait TokenBucketBuilder {
   def withTokens(contents: Long): TokenBucketBuilder
   def ofLimitedCapacity(capacity: Long): TokenBucketBuilder
   def suppliedBy(tap: Tap): TokenBucketBuilder
+  def relaxed: TokenBucketBuilder
+  def strict: TokenBucketBuilder
   def make: TokenBucket
 }
+
+trait Strictness
+case object Strict extends Strictness
+case object Relaxed extends Strictness
 
 class BasicTokenBucketBuilder extends TokenBucketBuilder {
   private var contents = 0L
   private var capacity = 0L
   private var tap: Option[Tap] = None
+  private var strictness: Strictness = Relaxed
 
   def withTokens(contents: Long) = {
     this.contents = contents
@@ -106,40 +118,86 @@ class BasicTokenBucketBuilder extends TokenBucketBuilder {
     this
   }
 
+  def strict = {
+    strictness = Strict
+    this
+  }
+
+  def relaxed = {
+    strictness = Relaxed
+    this
+  }
+
   def make = tap match {
-    case None =>
-      FiniteTokenBucket(capacity = capacity, contents = contents)
-    case Some(tap) =>
-      RefillingFiniteTokenBucket(capacity = capacity, contents = contents, tap = tap)
+    case None => strictness match {
+      case Relaxed => RelaxedFiniteTokenBucket(capacity = capacity, contents = contents)
+      case Strict => StrictFiniteTokenBucket(capacity = capacity, contents = contents)
+    }
+    case Some(tap) => strictness match {
+      case Relaxed => RefillingRelaxedFiniteTokenBucket(capacity, contents, tap)
+      case Strict => RefillingStrictFiniteTokenBucket(capacity, contents, tap)
+    }
   }
 }
 
-case class FiniteTokenBucket(capacity: Long = 0L, contents: Long = 0L) extends TokenBucket {
-  override def deposit(tokens: Long) = if (tokens + contents <= capacity) {
-    (copy(contents = contents + tokens), tokens)
-  } else {
-    (copy(contents = capacity), capacity - contents)
-  }
-
-  override def tryConsume(tokens: Long) = {
+trait RelaxedBucket extends TokenBucket {
+  def doConsume(tokens: Long) = {
     if (contents >= tokens) {
-      (copy(contents = contents - tokens), tokens)
+      (copyConstructor(contents - tokens), tokens)
     } else {
-      (copy(contents = 0L), contents)
+      (copyConstructor(0L), contents)
     }
   }
 }
 
-case class RefillingFiniteTokenBucket(override val capacity: Long = 0L, override val contents: Long = 0L, tap: Tap = Tap.maker.make)
-  extends FiniteTokenBucket(capacity, contents) {
-
-  override def tryConsume(tokens: Long) = {
-    val (bucket, _) = deposit(tap.drip)
-
-    if (bucket.contents >= tokens) {
-      (copy(contents = bucket.contents - tokens), tokens)
+trait StrictBucket extends TokenBucket {
+  def doConsume(tokens: Long) = {
+    if (contents >= tokens) {
+      (copyConstructor(contents - tokens), tokens)
     } else {
-      (copy(contents = 0L), bucket.contents)
+      (copyConstructor(contents), 0L)
     }
   }
+}
+
+trait FiniteBucket extends TokenBucket {
+  def capacity: Long
+  def deposit(tokens: Long) = if (tokens + contents <= capacity) {
+    copyConstructor(contents + tokens)
+  } else {
+    copyConstructor(capacity)
+  }
+}
+
+case class FiniteTokenBucket(capacity: Long, contents: Long)
+
+case class StrictFiniteTokenBucket(capacity: Long = 0L, contents: Long = 0L)
+  extends FiniteBucket with StrictBucket {
+
+  def copyConstructor(tokens: Long) = StrictFiniteTokenBucket(capacity, tokens)
+}
+
+case class RelaxedFiniteTokenBucket(capacity: Long = 0L, contents: Long = 0L)
+  extends FiniteBucket with RelaxedBucket {
+
+  def copyConstructor(tokens: Long) = RelaxedFiniteTokenBucket(capacity, tokens)
+}
+
+trait RefillingBucket extends TokenBucket {
+  def tap: Tap
+  override def preConsume = {
+    deposit(tap.drip)
+  }
+}
+
+case class RefillingStrictFiniteTokenBucket(capacity: Long, contents: Long, tap: Tap)
+  extends FiniteBucket with StrictBucket with RefillingBucket {
+
+  def copyConstructor(tokens: Long) = RefillingStrictFiniteTokenBucket(capacity, tokens, tap)
+}
+
+case class RefillingRelaxedFiniteTokenBucket(capacity: Long, contents: Long, tap: Tap)
+  extends FiniteBucket with RelaxedBucket with RefillingBucket {
+  
+  def copyConstructor(tokens: Long) = RefillingRelaxedFiniteTokenBucket(capacity, tokens, tap)
 }
